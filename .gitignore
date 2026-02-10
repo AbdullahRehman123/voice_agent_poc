@@ -1,0 +1,49 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# environment files
+.env
+
+# Virtual environment folder
+venv3.10/
+env/
+fresh-env/
+test-env/
+
+# uploads folder
+uploads/
+
+# migrations folder
+migrations/
+
+# .vscode folder
+.vscode/
+
+# Environment configuration file
+.env
+
+# Ignore all contents in models but keep the folder
+models/*
+!models/.gitkeep
+
+# Ignore all contents in transcriptions but keep the folder
+transcriptions/*
+!transcriptions/.gitkeep
+
+# Ignore all contents in english_audios but keep the folder
+english_audios/*
+!english_audios/.gitkeep
+
+# Ignore all contents in urdu_audios but keep the folder
+urdu_audios/*
+!urdu_audios/.gitkeep
+
+# Ignore all contents in logs but keep the folder
+logs/*
+!logs/.gitkeep
+
+.github/
