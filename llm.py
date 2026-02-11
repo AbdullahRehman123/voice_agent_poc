@@ -1,76 +1,43 @@
-# llm.py
+# llm.py - Refactored: Only handles LLM communication
+
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 import os
 
-
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# Now you can access the variables as if they were set normally
 gemini_developer_api_key = os.getenv("GEMINI_DEVELOPER_API_KEY")
-
-# Only run this block for Gemini Developer API
 client = genai.Client(api_key=gemini_developer_api_key)
 
-async def process_text(text: str) -> str:
-    """
-    This method represents LLM validation / processing.
-    For PoC: echoes input text.
-    Later: replace with GPT / Claude / local LLM.
-    """
-    return text
 
-def detect_intent_urdu(user_response):
-   
-    prompt = f"""Classify this Urdu response as 'yes' or 'no':
-    "{user_response}"
-   
-    Reply only with: yes or no"""
- 
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=types.Part.from_text(text=prompt),
-        config=types.GenerateContentConfig(
-            temperature=0,
-            top_p=0.95,
-            top_k=20,
-        ),
-    )
- 
-    result = response.text.strip().lower()
-   
-    return "yes" if "yes" in result else "no"
-
-def reformat_address_to_english(urdu_address):
-   
-    prompt = f"""Convert this Urdu text to English address format if it contains an address:
-    "{urdu_address}"
-   
-    Rules:
-    - If the text is NOT an address, return: "NOT_AN_ADDRESS"
-    - If it is an address:
-      • Transcribe EXACTLY what is spoken - do not add or invent words
-      • Convert all numbers to English numerals (1, 2, 3...)
-      • Replace: مکان/مکان نمبر/باؤس نمبر → House Number or H#
-      • Replace: گلی/گلی نمبر → Street Number or Street #
-      • Replace: بلاک → Block
-      • Keep location names in readable English
-      • Output format: House Number [#], [Block Name] Block, [Area], [City]
+async def get_response(prompt: str, temperature: float = 0.0) -> str:
+    """
+    Single method to get LLM response for any prompt.
+    This is the ONLY public method - all prompt engineering stays in orchestrators.
     
-    Output only the reformatted address or "NOT_AN_ADDRESS". Do not add extra words."""
- 
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=types.Part.from_text(text=prompt),
-        config=types.GenerateContentConfig(
-            temperature=0,
-            top_p=0.95,
-            top_k=20,
-        ),
-    )
- 
-    result = response.text.strip()
-   
-    return result if result != "NOT_AN_ADDRESS" else None
+    Args:
+        prompt: The prompt to send to the LLM
+        temperature: Temperature setting for response randomness (default: 0 for deterministic)
+    
+    Returns:
+        str: The LLM's response text
+    """
+    
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=types.Part.from_text(text=prompt),
+            config=types.GenerateContentConfig(
+                temperature=temperature,
+                top_p=0.95,
+                top_k=20,
+            ),
+        )
+        
+        return response.text.strip()
+    
+    except Exception as e:
+        print(f"❌ LLM Error: {e}")
+        return ""

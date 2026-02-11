@@ -1,4 +1,4 @@
-# stt.py - SIMPLER FIX: Adjust Speechmatics EOS sensitivity
+# stt.py - Refactored: Only handles speech-to-text transcription
 
 import asyncio
 import os
@@ -6,73 +6,39 @@ import sounddevice as sd
 from speechmatics.rt import AsyncClient, AudioFormat, TranscriptionConfig
 from dotenv import load_dotenv
 
-from functions import (
-    case_1_delivery_type,
-    case_2_order_item,
-    case_3_quantity,
-    case_4_extra,
-    case_5_address
-)
-
-# ======================
-# CONFIG
-# ======================
-
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# Now you can access the variables as if they were set normally
 speechmatics_api_key = os.getenv("SPEECHMATICS_API_KEY")
 SAMPLE_RATE = 16000
-CONFIRMATION_TIMEOUT = 3.0  # Wait 3 seconds after EOS before moving to next case
+SILENCE_TIMEOUT = 3.0  # Wait 3 seconds of silence before returning transcription
 
-# ======================
-# STATE
-# ======================
-current_case = 1
-context = {}
-test = ""
 
-CASE_FUNCTIONS = {
-    1: case_1_delivery_type,
-    2: case_2_order_item,
-    3: case_3_quantity,
-    4: case_4_extra,
-    5: case_5_address
-}
-
-async def transcribe_audio() -> str:
+async def transcribe() -> str:
     """
-    This method represents STT.
-    Returns concatenated transcription after conversation ends.
-    FIXED: Waits for confirmation timeout to handle long sentences.
+    Single method to capture audio and return transcribed text.
+    This is the ONLY public method - all logic stays in orchestrators.
+    
+    Returns:
+        str: The transcribed text from user speech
     """
     
-    # State management
-    accumulated_transcription = ""
-    current_case = 1
-    context = {}
+    # Internal state for this transcription session
+    accumulated_text = ""
+    current_segment = ""
+    last_speech_time = None
+    silence_confirmed = False
     session_active = True
-    global test
-    
-    # For handling long sentences
-    current_response = ""  # Accumulates text for the current case
-    last_eos_time = None   # Track when last EOS was detected
-    eos_confirmed = False  # True when we've waited long enough after EOS
-    pending_handler = None # Store the handler to execute after confirmation
     
     client = AsyncClient(api_key=speechmatics_api_key)
     
     def on_transcript(msg):
-        nonlocal accumulated_transcription, current_case, session_active
-        nonlocal current_response, last_eos_time, eos_confirmed, pending_handler
+        nonlocal accumulated_text, current_segment, last_speech_time, silence_confirmed
         
-        # Check if this is a final transcript
         results = msg.get("results", [])
         is_final = any(result.get("is_eos", False) for result in results)
-        global test
         
-        # Build the full transcript from all results with type 'word'
+        # Build transcript from word results
         full_transcript = ""
         for result in results:
             if result.get("type") == "word":
@@ -85,102 +51,61 @@ async def transcribe_audio() -> str:
         # Handle partial transcripts
         if not is_final:
             if full_transcript:
+                # Reverse for Urdu display
                 transcript_display = full_transcript[::-1]
-                test = transcript_display + " " + test
+                accumulated_text = transcript_display + " " + accumulated_text
                 print(f"⏳ Partial: {transcript_display}")
                 
-                # If we got more speech after EOS, cancel the pending handler
-                if pending_handler is not None:
-                    print("   ↪️ More speech detected, continuing to listen...")
-                    pending_handler = None
-                    last_eos_time = None
-                    eos_confirmed = False
+                # Reset silence timer - user is still speaking
+                last_speech_time = None
+                silence_confirmed = False
             return
         
-        # Final transcript detected (EOS)
+        # Handle final transcript (EOS detected)
         if not full_transcript:
             return
         
+        # Reverse for Urdu display
         transcript_display = full_transcript[::-1]
-        test = transcript_display + " " + test
+        accumulated_text = transcript_display + " " + accumulated_text
         
-        # Add to current response
-        if current_response:
-            current_response += " " + transcript_display
+        # Add to current segment
+        if current_segment:
+            current_segment += " " + transcript_display
         else:
-            current_response = transcript_display
+            current_segment = transcript_display
         
-        print(f"\n📜 Received: {transcript_display}")
-        #print(f"📝 Current response so far: {current_response[::-1]}")
+        print(f"📜 Received: {transcript_display}")
         
-        # Mark that we got an EOS, but don't process immediately
-        last_eos_time = asyncio.get_event_loop().time()
-        eos_confirmed = False
-        
-        # Store the handler to execute later (after timeout)
-        from functions import CASE_FUNCTIONS
-        pending_handler = CASE_FUNCTIONS.get(current_case)
+        # Mark when we received final speech
+        last_speech_time = asyncio.get_event_loop().time()
+        silence_confirmed = False
     
-    # Background task to monitor EOS confirmation timeout
-    async def monitor_eos_confirmation():
-        nonlocal current_response, last_eos_time, eos_confirmed, pending_handler
-        nonlocal accumulated_transcription, current_case, session_active
-
-        global test
+    async def monitor_silence():
+        """Monitor for silence timeout to end transcription"""
+        nonlocal current_segment, last_speech_time, silence_confirmed, session_active, accumulated_text
         
         while session_active:
             await asyncio.sleep(0.1)
             
-            # Check if we have a pending EOS that needs confirmation
-            if last_eos_time is not None and not eos_confirmed:
+            if last_speech_time is not None and not silence_confirmed:
                 current_time = asyncio.get_event_loop().time()
-                time_since_eos = current_time - last_eos_time
+                time_since_speech = current_time - last_speech_time
                 
-                # If enough time has passed without new speech
-                if time_since_eos >= CONFIRMATION_TIMEOUT:
-                    print(f"\n✅ Confirmed end of speech after {CONFIRMATION_TIMEOUT}s silence")
-                    eos_confirmed = True
+                if time_since_speech >= SILENCE_TIMEOUT:
+                    print(f"\n✅ Silence detected ({SILENCE_TIMEOUT}s) - ending transcription")
+                    silence_confirmed = True
                     
-                    # Now process the complete response
-                    if pending_handler is None:
-                        # No handler found - end session
-                        await client.stop_session()
-                        session_active = False
-                        continue
-                    
-                    # Add to accumulated transcription
-                    if accumulated_transcription:
-                        accumulated_transcription += " | " + test
-                    else:
-                        accumulated_transcription = test
-                    
-                    print(f"📋 Complete user input: {test}")
-                    
-                    # Call the handler with the COMPLETE response
-                    next_case = pending_handler(test, context)
-                    
-                    # Reset for next input
-                    current_response = ""
-                    last_eos_time = None
-                    pending_handler = None
-                    test = ""
-                    # Check if conversation is complete
-                    if next_case is None or isinstance(next_case, dict):
-                        await client.stop_session()
-                        session_active = False
-                        continue
-                    
-                    # Move to next case
-                    current_case = next_case
+                    # Stop the session
+                    await client.stop_session()
+                    session_active = False
     
     # Register event handlers
     client.on("AddTranscript", on_transcript)
-    client.on("RecognitionStarted", lambda msg: print("✅ Recognition started!"))
-    client.on("Error", lambda msg: print(f"❌ Error: {msg}"))
-    client.on("Warning", lambda msg: print(f"⚠️ Warning: {msg}"))
+    client.on("RecognitionStarted", lambda msg: print("🎤 Listening..."))
+    client.on("Error", lambda msg: print(f"❌ STT Error: {msg}"))
     
-    # Start session
-    print("🔄 Starting STT Session...")
+    # Start Speechmatics session
     await client.start_session(
         transcription_config=TranscriptionConfig(
             language="ur",
@@ -192,16 +117,12 @@ async def transcribe_audio() -> str:
             sample_rate=SAMPLE_RATE
         )
     )
-    print("✅ STT Session Started")
-    
-    # First question
-    print("🤖 Assalamualaikum! Kya aap delivery order karna chahte hain?")
     
     # Get event loop
     loop = asyncio.get_event_loop()
     
-    # Start the EOS monitoring task
-    monitor_task = asyncio.create_task(monitor_eos_confirmation())
+    # Start silence monitoring
+    monitor_task = asyncio.create_task(monitor_silence())
     
     # Audio callback
     def audio_callback(indata, frames, time, status):
@@ -228,7 +149,6 @@ async def transcribe_audio() -> str:
         stream.stop()
         stream.close()
         await client.stop_session()
-        print("✅ STT Session Stopped")
     
-    # Return the accumulated transcription
-    return accumulated_transcription.strip()
+    # Return the transcribed text
+    return accumulated_text.strip()
