@@ -37,7 +37,7 @@ class ExtrasOrchestrator:
         
         # Capture response
         user_response = await self.stt.transcribe()
-        #print(f"📝 Extras: {user_response}")
+        print(f"📝 Extras: {user_response[::-1]}")
         if self.logger:
             self.logger.info(f"Extras - User response: {user_response}")
         

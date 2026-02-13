@@ -36,7 +36,7 @@ class QuantityOrchestrator:
         
         # Capture response
         user_response = await self.stt.transcribe()
-        #print(f"📝 Quantity: {user_response}")
+        print(f"📝 Quantity: {user_response[::-1]}")
         if self.logger:
             self.logger.info(f"Quantity - User response: {user_response}")
         

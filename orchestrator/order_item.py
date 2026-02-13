@@ -36,7 +36,7 @@ class OrderItemOrchestrator:
         
         # Capture response
         user_response = await self.stt.transcribe()
-        #print(f"📝 User wants to order: {user_response}")
+        print(f"📝 User wants to order: {user_response[::-1]}")
 
         if self.logger:
             self.logger.info(f"OrderItem - User response: {user_response}")

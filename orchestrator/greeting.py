@@ -42,7 +42,7 @@ class GreetingOrchestrator:
             
             # Step 2: Capture user response
             user_response = await self.stt.transcribe()
-            #print(f"📝 User said: {user_response}")
+            print(f"📝 User said: {user_response[::-1]}")
             if self.logger:
                 self.logger.info(f"Greeting attempt {attempt + 1} - User said: {user_response}")
             
@@ -74,7 +74,9 @@ class GreetingOrchestrator:
                     if self.logger:
                         self.logger.info("Greeting - Intent unclear, retrying greeting")
                     # Play greeting again (only once)
-                    await self.tts.play_audio(greeting)
+                    greeting_attempt_second  = "Sorry, main aapki baat theek se sun nahi paaya, Kya aap delivery ka order place karna chahtay hain?"
+                    tts_second_attempt_response = await self.tts.play_audio(greeting_attempt_second)
+                    print(f"🔊 TTS Response: {tts_second_attempt_response}")
                 else:
                     # After retry, still unclear - transfer to staff
                     farewell = "Main aap ko staff se connect kar raha hoon jo aap ki help kar sakta hai. Kindly line per rahein."
@@ -100,68 +102,71 @@ class GreetingOrchestrator:
             if self.logger:
                 self.logger.warning("Greeting - Empty user response received")
             return "others"
+        
+        
 
         # Normalize text
-        text = user_response.lower().strip()
-        text = re.sub(r"[^\w\s]", "", text)
+        # text = user_response.lower().strip()
+        # text = re.sub(r"[^\w\s]", "", text)
 
         # -------------------------
         # NO KEYWORDS (CHECK FIRST)
         # -------------------------
-        no_keywords = [
-            "nahi",
-            "nahin",
-            "na",
-            "abhi nahi",
-            "order nahi",
-            "nahi karna",
-            "cancel",
-            "galat number",
-            "wrong number",
-            "no"
-        ]
+        # no_keywords = [
+        #     "nahi",
+        #     "nahin",
+        #     "na",
+        #     "abhi nahi",
+        #     "order nahi",
+        #     "nahi karna",
+        #     "cancel",
+        #     "galat number",
+        #     "wrong number",
+        #     "no"
+        # ]
 
-        for word in no_keywords:
-            if word in text:
-                if self.logger:
-                    self.logger.info(f"Greeting - Keyword match NO: '{word}' found in: {text}")
-                return "no"
+        # for word in no_keywords:
+        #     if word in text:
+        #         if self.logger:
+        #             self.logger.info(f"Greeting - Keyword match NO: '{word}' found in: {text}")
+        #         return "no"
 
         # -------------------------
         # YES KEYWORDS
         # -------------------------
-        yes_keywords = [
-            "ji",
-            "jee",
-            "ji haan",
-            "haan",
-            "han",
-            "ha",
-            "bilkul",
-            "bilkul theek",
-            "order karna hai",
-            "order karna he",
-            "order likh lein",
-            "likh lein",
-            "likh lo",
-            "haan order",
-            "jee order",
-            "karna hai",
-            "karna he",
-            "yes"
-        ]
+        # yes_keywords = [
+        #     "ji",
+        #     "jee",
+        #     "ji haan",
+        #     "haan",
+        #     "han",
+        #     "ha",
+        #     "bilkul",
+        #     "bilkul theek",
+        #     "order karna hai",
+        #     "order karna he",
+        #     "order likh lein",
+        #     "likh lein",
+        #     "likh lo",
+        #     "haan order",
+        #     "jee order",
+        #     "karna hai",
+        #     "karna he",
+        #     "yes"
+        # ]
 
-        for word in yes_keywords:
-            if word in text:
-                if self.logger:
-                    self.logger.info(f"Greeting - Keyword match YES: '{word}' found in: {text}")
-                return "yes"
+        # for word in yes_keywords:
+        #     if word in text:
+        #         if self.logger:
+        #             self.logger.info(f"Greeting - Keyword match YES: '{word}' found in: {text}")
+        #         return "yes"
+        
 
         # -------------------------
         # LLM FALLBACK
         # -------------------------
         if self.logger:
-            self.logger.info(f"Greeting - No keyword match, falling back to LLM for: {user_response}")
+            self.logger.info(f"Greeting - Asking LLM to classify response for: {user_response}")
 
         prompt = f"""Classify this Urdu response aginst question {greeting}
 	as 'yes', 'no' or 'others' to order: "{user_response}" Reply only with: yes, no or others"""
@@ -170,7 +175,7 @@ class GreetingOrchestrator:
         result = response.lower().strip()
 
         if self.logger:
-            self.logger.info(f"Greeting - LLM fallback result: {result}")
+            self.logger.info(f"Greeting - LLM result: {result}")
 
         if result == "yes":
             return "yes"

@@ -8,6 +8,6 @@ class TTS:
             self.logger.info(f"TTS Playing: {text}")
 
         # TODO: Implement actual TTS service
-        print(f"🔊 {text}")
+        #print(f"🔊 {text}")
 
         return f"Played: {text}"
