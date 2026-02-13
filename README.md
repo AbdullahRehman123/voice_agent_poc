@@ -1,60 +1,89 @@
-# KFC Voice Agent - Refactored Architecture
+# KFC Voice Agent
 
 ## 📁 Project Structure
 
 ```
-voice_agent_refactored/
-├── main.py                      # Entry point - orchestrates the flow
-├── stt.py                       # Speech-to-Text (simple interface)
-├── llm.py                       # LLM interface (simple interface)
-├── tts.py                       # Text-to-Speech (simple interface)
-├── orchestrator/                # Business logic folder
+voice_agent_poc/
+├── main.py                         # Entry point - orchestrates the flow
+├── logger.py                       # Rotating datetime-based logger setup
+├── ai/                             # AI service classes (loaded into memory once)
 │   ├── __init__.py
-│   ├── greeting.py             # Handles greeting + intent detection
-│   ├── order_item.py           # Handles order item collection
-│   ├── quantity.py             # Handles quantity collection
-│   ├── extras.py               # Handles extras collection
-│   └── address.py              # Handles address collection + validation
+│   ├── stt.py                      # Speech-to-Text class (Speechmatics)
+│   ├── llm.py                      # LLM class (Google Gemini)
+│   └── tts.py                      # Text-to-Speech class
+├── orchestrator/                   # Business logic - one file per conversation step
+│   ├── __init__.py
+│   ├── greeting.py                 # Greeting + intent detection (yes/no/others, 1 retry)
+│   ├── order_item.py               # Order item collection
+│   ├── quantity.py                 # Quantity collection
+│   ├── extras.py                   # Extras collection
+│   └── address.py                  # Address collection + LLM reformatting
+├── integration/                    # External service integrations
+│   ├── __init__.py
+│   └── routeToAgent.py             # Route call to human agent (stub)
+├── logs/                           # Auto-created, one log file per execution
+│   └── 2026-02-13_14-30-00.log
+├── .env                            # API keys (not committed)
+├── .gitignore
 ├── requirements.txt
-├── .env.example
 └── README.md
 ```
+
+---
 
 ## 🏗️ Architecture Principles
 
 ### 1. Separation of Concerns
 
-- **Orchestrators** = Business logic (what to ask, when, retry logic)
-- **STT** = Technical implementation (only transcribes)
-- **LLM** = Technical implementation (only returns AI response)
-- **TTS** = Technical implementation (only speaks text)
+- **`ai/`** = Technical implementations only (how to transcribe, how to call LLM, how to speak)
+- **`orchestrator/`** = Business logic only (what to ask, when, retry logic, decisions)
+- **`integration/`** = External service connections (routing, CRM, etc.)
+- **`logger.py`** = Logging setup, one timestamped file per execution
 
 ### 2. Single Responsibility
 
-Each module has ONE clear job:
+Each class and method has ONE clear job:
 
-- `stt.py` → `transcribe()` - Returns transcribed text
-- `llm.py` → `get_response(prompt)` - Returns LLM response
-- `tts.py` → `play_audio(text)` - Plays audio
-- Each orchestrator → Handles ONE step of the conversation
+- `STT.transcribe()` → Listens to mic, returns transcribed text
+- `LLM.get_response(prompt)` → Sends prompt to Gemini, returns response
+- `TTS.play_audio(text)` → Plays audio to caller
+- Each orchestrator → Handles ONE step of the conversation flow
 
-### 3. Easy to Swap Services
+### 3. AI Classes Loaded Once into Memory
 
-Want to change from Speechmatics to Google STT? Just modify `stt.py`.
-Want to change from Gemini to GPT-4? Just modify `llm.py`.
+All three AI classes are instantiated once in `main.py` and injected into every orchestrator. This means no repeated initialisation on every call.
 
-The orchestrators don't need to change!
+```python
+# main.py - instantiated once
+stt = STT(logger=logger)
+llm = LLM(logger=logger)
+tts = TTS(logger=logger)
 
-## 🎯 Flow Diagram
+# Injected into each orchestrator
+greeting = GreetingOrchestrator(logger=logger)  # internally uses same pattern
+```
+
+### 4. Easy to Swap AI Services
+
+Want to switch from Speechmatics to Google STT? Only change `ai/stt.py` — keep `transcribe()` signature the same.
+Want to switch from Gemini to GPT-4 or Claude? Only change `ai/llm.py` — keep `get_response(prompt)` signature the same.
+
+Orchestrators never need to change when switching providers.
+
+---
+
+## 🎯 Conversation Flow
 
 ```
 main.py
-  ↓
+  ↓ (1 second delay)
 GreetingOrchestrator
-  ├─→ TTS: "Assalam o Alaikum..."
+  ├─→ TTS: "Assalam o Alaikum, thank you for calling KFC..."
   ├─→ STT: transcribe()
-  ├─→ LLM: detect_intent()
-  └─→ Decision: yes/no/others (1 retry)
+  ├─→ Intent: keyword match → LLM fallback
+  ├─→ yes  → proceed
+  ├─→ no   → RouteToAgent → exit
+  └─→ others → retry once → RouteToAgent → exit
        ↓ (if yes)
 OrderItemOrchestrator
   ├─→ TTS: "Aap kya order karna chahte hain?"
@@ -71,11 +100,43 @@ ExtrasOrchestrator
 AddressOrchestrator
   ├─→ TTS: "Apna address bataen?"
   ├─→ STT: transcribe()
-  ├─→ LLM: reformat_address()
-  └─→ Validation (1 retry)
+  ├─→ LLM: reformat Urdu address to English
+  └─→ Invalid → retry once → abort
        ↓
-Order Summary
+Order Summary printed to terminal
 ```
+
+---
+
+## 📝 Greeting Orchestrator Details
+
+Intent detection uses a **hybrid approach**:
+
+1. **Keyword matching first** (fast, no LLM cost)
+   - No keywords checked before yes keywords to avoid false positives
+2. **LLM fallback** if no keyword matched
+
+Intent outcomes:
+- `yes` → Proceed to order flow
+- `no` → Play farewell, call `RouteToAgent.routeCallToAgent()`, exit
+- `others` → Retry greeting once → if still `others` → same as `no`
+
+---
+
+## 📋 Logging
+
+Every execution creates a new log file in `logs/` with a datetime-stamped filename:
+
+```
+logs/
+└── 2026-02-13_14-30-00.log
+```
+
+**Log file captures:** STT partials, STT finals, LLM prompts, LLM responses, intent decisions, keyword matches, errors and warnings.
+
+**Terminal only shows:** the conversation flow — TTS output, user responses, intent results, order summary.
+
+---
 
 ## 🚀 Setup
 
@@ -84,10 +145,10 @@ Order Summary
    pip install -r requirements.txt
    ```
 
-2. **Configure environment:**
-   ```bash
-   cp .env.example .env
-   # Edit .env and add your API keys
+2. **Configure environment — create a `.env` file:**
+   ```
+   SPEECHMATICS_API_KEY=your_key_here
+   GEMINI_DEVELOPER_API_KEY=your_key_here
    ```
 
 3. **Run the agent:**
@@ -95,85 +156,47 @@ Order Summary
    python main.py
    ```
 
-## 📝 Greeting Orchestrator Details
-
-### Flow:
-1. Play greeting
-2. Capture user response
-3. Detect intent (yes/no/others)
-4. If "others" → Ask again (1 retry only)
-5. If still "others" → Transfer to staff
-6. If "no" → Transfer to staff
-7. If "yes" → Proceed to next step
-
-### Success Message:
-When greeting completes (yes/no/transfer), prints: `"✅ greeting tested successfully"`
-
-## 🔧 Extending the System
-
-### Adding a new orchestrator:
-
-1. Create `orchestrator/new_step.py`
-2. Implement `execute(context)` method
-3. Use `stt.transcribe()`, `llm.get_response()`, `tts.play_audio()`
-4. Add to `main.py` flow
-
-### Changing STT service:
-
-Just modify `stt.py` → keep the `transcribe()` signature the same.
-
-### Changing LLM service:
-
-Just modify `llm.py` → keep the `get_response(prompt)` signature the same.
-
-## 🎤 Testing Individual Components
-
-```python
-# Test STT only
-import asyncio
-import stt
-
-async def test_stt():
-    text = await stt.transcribe()
-    print(f"Transcribed: {text}")
-
-asyncio.run(test_stt())
-```
-
-```python
-# Test LLM only
-import asyncio
-import llm
-
-async def test_llm():
-    response = await llm.get_response("What is 2+2?")
-    print(f"LLM Response: {response}")
-
-asyncio.run(test_llm())
-```
+---
 
 ## 📊 Context Dictionary
 
-The `context` dictionary is shared across all orchestrators:
+The `context` dictionary is built up across orchestrators and contains the full order at the end:
 
 ```python
 {
     "order_item": "Zinger Burger",
     "quantity": "2",
     "extra": "Fries",
-    "address": "House Number 123, B Block, DHA, Lahore"
+    "address": "House Number 5, B Block, DHA Phase 2, Lahore"
 }
 ```
 
-## 🎯 Key Improvements from Original Code
+---
 
-1. ✅ **Clear separation** - Each file has ONE job
-2. ✅ **Easy to test** - Each component can be tested independently
-3. ✅ **Easy to swap** - Change STT/LLM service without touching orchestrators
-4. ✅ **Follows requirements** - Greeting has exactly 1 retry, as specified
-5. ✅ **Maintainable** - New developers can understand the flow easily
-6. ✅ **Scalable** - Easy to add new conversation steps
+## 🔧 Extending the System
 
-## 📞 Support
+### Adding a new conversation step:
 
-For questions, contact the development team.
+1. Create `orchestrator/new_step.py`
+2. Define class with `__init__(self, logger=None)` and `execute(self, context)` method
+3. Use `self.stt.transcribe()`, `self.llm.get_response()`, `self.tts.play_audio()`
+4. Add to the flow in `main.py`
+
+### Adding a new integration:
+
+1. Create `integration/new_service.py`
+2. Define class with required methods
+3. Import and call from relevant orchestrator
+
+---
+
+## 🎯 Key Improvements from Sprint 1 → Sprint 2
+
+| | Sprint 1 | Sprint 2 |
+|---|---|---|
+| AI files location | root directory | `ai/` folder |
+| AI services | standalone functions | classes loaded into memory |
+| Intent detection | LLM only | keyword match + LLM fallback |
+| Logging | print statements only | rotating datetime log files |
+| Human handoff | not implemented | `integration/routeToAgent.py` stub |
+| Startup delay | none | 1 second delay in `main.py` |

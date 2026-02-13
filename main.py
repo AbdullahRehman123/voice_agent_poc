@@ -12,6 +12,9 @@ from orchestrator.order_item import OrderItemOrchestrator
 from orchestrator.quantity import QuantityOrchestrator
 from orchestrator.extras import ExtrasOrchestrator
 from orchestrator.address import AddressOrchestrator
+from integration.routeToAgent import RouteToAgent
+
+from logger import setup_logger
 
 
 async def voice_agent_controller():
@@ -19,10 +22,14 @@ async def voice_agent_controller():
     Main controller for the voice agent.
     Orchestrates the entire order flow.
     """
+
+    logger = setup_logger()
     
     print("=" * 50)
     print("🎙️  KFC Voice Agent Started")
     print("=" * 50)
+
+    await asyncio.sleep(1)  # ✅ 1 second delay before flow starts
     
     # Shared context to store order details
     context = {}
@@ -30,11 +37,13 @@ async def voice_agent_controller():
     # Step 1: Greeting and intent detection
     print("\n📍 Step 1: Greeting")
     print("-" * 50)
-    greeting_orchestrator = GreetingOrchestrator()
+    greeting_orchestrator = GreetingOrchestrator(logger=logger)
     should_proceed = await greeting_orchestrator.execute()
     
     if not should_proceed:
         print("\n❌ User chose not to order or unclear response. Ending call.")
+        routeToAgent_orchestrator = RouteToAgent()
+        await routeToAgent_orchestrator.routeCallToAgent()
         return
     
     print("\n✅ User wants to place an order. Proceeding...")
@@ -42,7 +51,7 @@ async def voice_agent_controller():
     # Step 2: Collect order item
     print("\n📍 Step 2: Order Item")
     print("-" * 50)
-    order_item_orchestrator = OrderItemOrchestrator()
+    order_item_orchestrator = OrderItemOrchestrator(logger=logger)
     success = await order_item_orchestrator.execute(context)
     
     if not success:
@@ -52,7 +61,7 @@ async def voice_agent_controller():
     # Step 3: Collect quantity
     print("\n📍 Step 3: Quantity")
     print("-" * 50)
-    quantity_orchestrator = QuantityOrchestrator()
+    quantity_orchestrator = QuantityOrchestrator(logger=logger)
     success = await quantity_orchestrator.execute(context)
     
     if not success:
@@ -62,7 +71,7 @@ async def voice_agent_controller():
     # Step 4: Collect extras
     print("\n📍 Step 4: Extras")
     print("-" * 50)
-    extras_orchestrator = ExtrasOrchestrator()
+    extras_orchestrator = ExtrasOrchestrator(logger=logger)
     success = await extras_orchestrator.execute(context)
     
     if not success:
@@ -72,7 +81,7 @@ async def voice_agent_controller():
     # Step 5: Collect address
     print("\n📍 Step 5: Address")
     print("-" * 50)
-    address_orchestrator = AddressOrchestrator()
+    address_orchestrator = AddressOrchestrator(logger=logger)
     success = await address_orchestrator.execute(context)
     
     if not success:
@@ -85,7 +94,11 @@ async def voice_agent_controller():
     print("=" * 50)
     
     for key, value in context.items():
-        print(f"{key.upper()}: {value}")
+    # Reverse Urdu strings for display, but keep English address as-is
+        if key.lower() == "address":
+            print(f"{key.upper()}: {value}")
+        else:
+            print(f"{key.upper()}: {value[::-1]}")
     
     print("\n🎉 Order confirmed! Thank you for calling KFC.")
     print("=" * 50)

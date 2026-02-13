@@ -2,12 +2,13 @@
 
 import sys
 import os
+import re
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import stt
-import llm
-import tts
+from ai import STT
+from ai import LLM
+from ai import TTS
 
 
 class GreetingOrchestrator:
@@ -16,7 +17,11 @@ class GreetingOrchestrator:
     Returns True if user wants to proceed, False otherwise.
     """
     
-    def __init__(self):
+    def __init__(self, logger = None):
+        self.logger = logger
+        self.stt = STT(logger=logger)
+        self.llm = LLM(logger=logger)
+        self.tts = TTS(logger=logger)
         self.max_retries = 1  # Only 1 retry as per requirements
     
     async def execute(self) -> bool:
@@ -29,67 +34,147 @@ class GreetingOrchestrator:
         
         # Step 1: Initial greeting
         greeting = "Assalam o Alaikum, thank you for calling KFC. This is Asad. Kya aap delivery ka order place karna chahtay hain?"
-        tts_response = await tts.play_audio(greeting)
+        tts_response = await self.tts.play_audio(greeting)
         print(f"🔊 TTS Response: {tts_response}")
         
         # Try once, with one retry if needed
         for attempt in range(self.max_retries + 1):
             
             # Step 2: Capture user response
-            user_response = await stt.transcribe()
-            print(f"📝 User said: {user_response}")
+            user_response = await self.stt.transcribe()
+            #print(f"📝 User said: {user_response}")
+            if self.logger:
+                self.logger.info(f"Greeting attempt {attempt + 1} - User said: {user_response}")
             
             # Step 3: Check intent with LLM
-            intent = await self._detect_intent(user_response)
-            print(f"🤖 Intent detected: {intent}")
+            intent = await self._detect_intent(greeting, user_response)
+            #print(f"🤖 Intent detected: {intent}")
+            if self.logger:
+                self.logger.info(f"Greeting attempt {attempt + 1} - Intent detected: {intent}")
             
             # Step 4: Handle based on intent
             if intent == "yes":
+                if self.logger:
+                    self.logger.info("Greeting - User wants to place order, proceeding")
                 # Proceed to next step
                 return True
             
             elif intent == "no":
                 # User doesn't want to order - transfer to staff
                 farewell = "Main aap ko staff se connect kar raha hoon jo aap ki help kar sakta hai. Kindly line per rahein."
-                await tts.play_audio(farewell)
-                print("✅ greeting tested successfully")
+                await self.tts.play_audio(farewell)
+                if self.logger:
+                    self.logger.info("Greeting - User declined order, routing to staff")
+                #print("✅ greeting tested successfully")
                 return False
             
             else:  # intent == "others"
                 # Unclear response
                 if attempt < self.max_retries:
-                    # Ask again (only once)
-                    retry_message = "Sorry me apki bat nahi samajha, Kya aap delivery ka order place karna chahtay hain?"
-                    await tts.play_audio(retry_message)
+                    if self.logger:
+                        self.logger.info("Greeting - Intent unclear, retrying greeting")
+                    # Play greeting again (only once)
+                    await self.tts.play_audio(greeting)
                 else:
                     # After retry, still unclear - transfer to staff
                     farewell = "Main aap ko staff se connect kar raha hoon jo aap ki help kar sakta hai. Kindly line per rahein."
-                    await tts.play_audio(farewell)
-                    print("✅ greeting tested successfully")
+                    await self.tts.play_audio(farewell)
+                    if self.logger:
+                        self.logger.info("Greeting - Intent still unclear after retry, routing to staff")
+                    #print("✅ greeting tested successfully")
                     return False
         
         return False
     
-    async def _detect_intent(self, user_response: str) -> str:
+    async def _detect_intent(self, greeting: str, user_response: str) -> str:
         """
-        Detect user intent using LLM.
-        
-        Args:
-            user_response: The user's spoken text
+        Hybrid intent detection:
+        1. Rule-based keyword matching
+        2. LLM fallback if unclear
         
         Returns:
-            str: "yes", "no", or "others"
+            "yes", "no", or "others"
         """
-        
-        prompt = f"""Classify this Urdu response as 'yes' or 'no': "{user_response}" Reply only with: yes or no"""
-        
-        response = await llm.get_response(prompt, temperature=0.0)
+
+        if not user_response:
+            if self.logger:
+                self.logger.warning("Greeting - Empty user response received")
+            return "others"
+
+        # Normalize text
+        text = user_response.lower().strip()
+        text = re.sub(r"[^\w\s]", "", text)
+
+        # -------------------------
+        # NO KEYWORDS (CHECK FIRST)
+        # -------------------------
+        no_keywords = [
+            "nahi",
+            "nahin",
+            "na",
+            "abhi nahi",
+            "order nahi",
+            "nahi karna",
+            "cancel",
+            "galat number",
+            "wrong number",
+            "no"
+        ]
+
+        for word in no_keywords:
+            if word in text:
+                if self.logger:
+                    self.logger.info(f"Greeting - Keyword match NO: '{word}' found in: {text}")
+                return "no"
+
+        # -------------------------
+        # YES KEYWORDS
+        # -------------------------
+        yes_keywords = [
+            "ji",
+            "jee",
+            "ji haan",
+            "haan",
+            "han",
+            "ha",
+            "bilkul",
+            "bilkul theek",
+            "order karna hai",
+            "order karna he",
+            "order likh lein",
+            "likh lein",
+            "likh lo",
+            "haan order",
+            "jee order",
+            "karna hai",
+            "karna he",
+            "yes"
+        ]
+
+        for word in yes_keywords:
+            if word in text:
+                if self.logger:
+                    self.logger.info(f"Greeting - Keyword match YES: '{word}' found in: {text}")
+                return "yes"
+
+        # -------------------------
+        # LLM FALLBACK
+        # -------------------------
+        if self.logger:
+            self.logger.info(f"Greeting - No keyword match, falling back to LLM for: {user_response}")
+
+        prompt = f"""Classify this Urdu response aginst question {greeting}
+	as 'yes', 'no' or 'others' to order: "{user_response}" Reply only with: yes, no or others"""
+
+        response = await self.llm.get_response(prompt, temperature=0.0)
         result = response.lower().strip()
-        
-        # Ensure we return a valid intent
-        if "yes" in result:
+
+        if self.logger:
+            self.logger.info(f"Greeting - LLM fallback result: {result}")
+
+        if result == "yes":
             return "yes"
-        elif "no" in result:
+        elif result == "no":
             return "no"
         else:
             return "others"
@@ -102,8 +187,8 @@ if __name__ == "__main__":
     async def test_detect_intent():
         """Test the intent detection without running full flow"""
         orchestrator = GreetingOrchestrator()
-        
-        intent = await orchestrator._detect_intent("جی بالکل")
+        greeting = "Assalam o Alaikum, thank you for calling KFC. This is Asad. Kya aap delivery ka order place karna chahtay hain?"
+        intent = await orchestrator._detect_intent(greeting, "جی نہیں، مجھے آرڈر نہیں کرنا")
         print(intent)  # Expected: yes
     
     # Run the test
