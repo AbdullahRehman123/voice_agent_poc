@@ -34,8 +34,7 @@ class GreetingOrchestrator:
         
         # Step 1: Initial greeting
         greeting = "Assalam o Alaikum, thank you for calling KFC. This is Asad. Kya aap delivery ka order place karna chahtay hain?"
-        tts_response = await self.tts.play_audio(greeting)
-        print(f"🔊 TTS Response: {tts_response}")
+        await self.tts.play_audio(greeting)
         
         # Try once, with one retry if needed
         for attempt in range(self.max_retries + 1):
@@ -47,7 +46,8 @@ class GreetingOrchestrator:
                 self.logger.info(f"Greeting attempt {attempt + 1} - User said: {user_response}")
             
             # Step 3: Check intent with LLM
-            intent = await self._detect_intent(greeting, user_response)
+            #intent = await self._detect_intent(greeting, user_response)
+            intent = "yes"  # Hardcoded for now
             #print(f"🤖 Intent detected: {intent}")
             if self.logger:
                 self.logger.info(f"Greeting attempt {attempt + 1} - Intent detected: {intent}")
