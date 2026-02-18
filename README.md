@@ -1,4 +1,4 @@
-# KFC Voice Agent
+# Voice Agent POC
 
 ## 📁 Project Structure
 
