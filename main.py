@@ -106,7 +106,7 @@ async def voice_agent_controller():
     
     for key, value in context.items():
         # Reverse string values for better urdu readability in console, except for address and intent which are english
-        if isinstance(value, str) and key.lower() != "address" and key.lower() != "intent":
+        if isinstance(value, str) and key.lower() in ["order_item", "quantity", "extra"]:
             print(f"  {key.upper()}: {value[::-1]}")
         else:
             print(f"  {key.upper()}: {value}")

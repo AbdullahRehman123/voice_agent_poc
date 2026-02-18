@@ -81,56 +81,8 @@ class AddressOrchestrator:
             # await self.router.routeCallToAgent()
             # return False
 
-            # Ask for address
-            question = "Apna address bataen?"
-            await self.tts.play_audio(question)
-
-            user_address_response = await self.stt.transcribe()
-
-            if self.logger:
-                self.logger.info("Address - Asking user for address")
-            
-            # Reformat address to English using LLM
-            reformatted_address = await self._reformat_address(user_address_response)
-            
-            if reformatted_address and reformatted_address != "NOT_AN_ADDRESS":
-                # Valid address
-                context["address"] = reformatted_address
-                print(f"✅ Reformatted Address: {reformatted_address}")
-                if self.logger:
-                    self.logger.info(f"Address - Reformatted successfully: {reformatted_address}")
-                return True
-            else:
-                if self.logger:
-                    self.logger.warning(f"Address - LLM returned NOT_AN_ADDRESS for: {user_address_response}, retrying")
-                # Invalid address - ask again
-                retry_message = "Address ko samajhne mein problem hui. Address doobara bataen."
-                await self.tts.play_audio(retry_message)
-                
-                # Try one more time
-                user_address_retry = await self.stt.transcribe()
-                print(f"📝 Address (retry): {user_address_retry}")
-                if self.logger:
-                    self.logger.info(f"Address - Retry user response: {user_address_retry}")
-                
-                reformatted_address = await self._reformat_address(user_address_retry)
-                
-                if reformatted_address and reformatted_address != "NOT_AN_ADDRESS":
-                    context["address"] = reformatted_address
-                    print(f"✅ Reformatted Address: {reformatted_address}")
-                    if self.logger:
-                        self.logger.info(f"Address - Retry reformatted successfully: {reformatted_address}")
-                    return True
-                else:
-                    # Still invalid - might need to abort or transfer
-                    print("❌ Could not understand address after retry")
-                    if self.logger:
-                        self.logger.error(f"Address - Could not understand address after retry, aborting. Last input: {user_response}")
-                    farewell = "Main aap ko staff se connect kar raha hoon jo aap ki help kar sakta hai. Kindly line per rahein."
-                    await self.tts.play_audio(farewell)
-                    await self.router.routeCallToAgent()
-                    
-                    return False
+            # no or others on second attempt → ask for new address
+            return await self._collect_new_address(context)           
 
         else:  # others
             result = await self._get_response_on_others(
@@ -183,7 +135,7 @@ class AddressOrchestrator:
 
         # Capture retry response
         user_response_retry = await self.stt.transcribe()
-        print(f"📝 User response (retry): {user_response_retry}")
+        print(f"📝 User response (retry): {user_response_retry[::-1]}")
         if self.logger:
             self.logger.info(f"Address - User response (attempt 2): {user_response_retry}")
 
@@ -205,57 +157,68 @@ class AddressOrchestrator:
             # await self.router.routeCallToAgent()
             # return False
 
-            question = "Apna address bataen?"
-            await self.tts.play_audio(question)
+            # no or others on second attempt → ask for new address
+            return await self._collect_new_address(context)        
+                
+    async def _collect_new_address(self, context: dict) -> bool:
+        """
+        Ask user to provide new address with 1 retry.
+        Returns True if valid address collected, False if need to route to agent.
+        """
+        question = "Apna address bataen?"
+        await self.tts.play_audio(question)
 
+        if self.logger:
+            self.logger.info("Address - Asking user for address")
+        
+        # First attempt
+        user_address_response = await self.stt.transcribe()
+        print(f"📝 Address: {user_address_response[::-1]}")
+        if self.logger:
+            self.logger.info(f"Address - User provided: {user_address_response}")
+        
+        reformatted_address = await self._reformat_address(user_address_response)
+        
+        if reformatted_address and reformatted_address != "NOT_AN_ADDRESS":
+            # Valid address
+            context["address"] = reformatted_address
+            print(f"✅ Reformatted Address: {reformatted_address}")
             if self.logger:
-                self.logger.info("Address - Asking user for address")
-            
-            address_user_response = await self.stt.transcribe()
-            
-            # Reformat address to English using LLM
-            reformatted_address = await self._reformat_address(address_user_response)
-            #reformatted_address = "NOT_AN_ADDRESS"  # Hardcoded for now
-            
-            if reformatted_address and reformatted_address != "NOT_AN_ADDRESS":
-                # Valid address
-                context["address"] = reformatted_address
-                print(f"✅ Reformatted Address: {reformatted_address}")
-                if self.logger:
-                    self.logger.info(f"Address - Reformatted successfully: {reformatted_address}")
-                return True
-            else:
-                if self.logger:
-                    self.logger.warning(f"Address - LLM returned NOT_AN_ADDRESS for: {address_user_response}, retrying")
-                # Invalid address - ask again
-                retry_message = "Address ko samajhne mein problem hui. Address doobara bataen."
-                await self.tts.play_audio(retry_message)
-                
-                # Try one more time
-                address_response_retry = await self.stt.transcribe()
-                print(f"📝 Address (retry): {address_response_retry}")
-                if self.logger:
-                    self.logger.info(f"Address - Retry user response: {address_response_retry}")
-                
-                reformatted_address = await self._reformat_address(address_response_retry)
-                #reformatted_address = "NOT_AN_ADDRESS"  # Hardcoded for now
-                
-                if reformatted_address and reformatted_address != "NOT_AN_ADDRESS":
-                    context["address"] = reformatted_address
-                    print(f"✅ Reformatted Address: {reformatted_address}")
-                    if self.logger:
-                        self.logger.info(f"Address - Retry reformatted successfully: {reformatted_address}")
-                    return True
-                else:
-                    # Still invalid - might need to abort or transfer
-                    print("❌ Could not understand address after retry")
-                    if self.logger:
-                        self.logger.error(f"Address - Could not understand address after retry, aborting. Last input: {user_response}")
-                    farewell = "Main aap ko staff se connect kar raha hoon jo aap ki help kar sakta hai. Kindly line per rahein."
-                    await self.tts.play_audio(farewell)
-                    await self.router.routeCallToAgent()
-                    
-                    return False    
+                self.logger.info(f"Address - Reformatted successfully: {reformatted_address}")
+            return True
+        
+        # Invalid address - retry once
+        if self.logger:
+            self.logger.warning(f"Address - LLM returned NOT_AN_ADDRESS for: {user_address_response}, retrying")
+        
+        retry_message = "Address ko samajhne mein problem hui. Address doobara bataen."
+        await self.tts.play_audio(retry_message)
+        
+        # Second attempt
+        address_response_retry = await self.stt.transcribe()
+        print(f"📝 Address (retry): {address_response_retry[::-1]}")
+        if self.logger:
+            self.logger.info(f"Address - Retry user response: {address_response_retry}")
+        
+        reformatted_address = await self._reformat_address(address_response_retry)
+        
+        if reformatted_address and reformatted_address != "NOT_AN_ADDRESS":
+            context["address"] = reformatted_address
+            print(f"✅ Reformatted Address: {reformatted_address}")
+            if self.logger:
+                self.logger.info(f"Address - Retry reformatted successfully: {reformatted_address}")
+            return True
+        
+        # Still invalid after retry - route to agent
+        print("❌ Could not understand address after retry")
+        if self.logger:
+            self.logger.error(f"Address - Could not understand address after retry, routing to agent")
+        
+        farewell = "Main aap ko staff se connect kar raha hoon jo aap ki help kar sakta hai. Kindly line per rahein."
+        await self.tts.play_audio(farewell)
+        await self.router.routeCallToAgent()
+        
+        return False
 
     async def _say_thanks_and_check_location(self, customer_address: str, context: dict):
         """
